@@ -1,2 +1,2 @@
 # ECG_DL
-Deep Learning Model for ECG
+CNN for ECG
