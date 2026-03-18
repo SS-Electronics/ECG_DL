@@ -1,4 +1,4 @@
-%% ECG CNN Classification - Automated Training Pipeline
+%% ECG CNN Classification [ Training ]
 % Main script to orchestrate multi-model training
 % 
 % This script demonstrates:
@@ -7,19 +7,23 @@
 % 3. Multiple model training
 % 4. Model evaluation and comparison
 %
-% Author: ECG Classification Framework
-% Date: 2024
+% Author:   Subhajit Roy
+%           subhajitroy005@gmail.com\
+%
+% Date: 18.03.2024
 
 clear; clc; close all;
 
+
 %% STEP 1: Initialize Project
-fprintf('\n╔════════════════════════════════════════════════════════════╗\n');
+fprintf('╔════════════════════════════════════════════════════════════╗\n');
 fprintf('║   ECG CNN Classification - Automated Training Pipeline     ║\n');
 fprintf('╚════════════════════════════════════════════════════════════╝\n\n');
 
 % Setup paths and configuration
 ProjectConfig.initialize();
 ProjectConfig.printConfig();
+
 
 %% STEP 2: Create Training Orchestrator
 fprintf('[Main] Initializing Training Orchestrator...\n');

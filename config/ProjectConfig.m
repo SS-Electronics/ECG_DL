@@ -68,7 +68,7 @@ classdef ProjectConfig
             addpath(fullfile(ProjectConfig.PROJECT_ROOT, 'training'));
             addpath(fullfile(ProjectConfig.PROJECT_ROOT, 'utils'));
             addpath(fullfile(ProjectConfig.PROJECT_ROOT, 'config'));
-            addpath(fullfile(ProjectConfig.PROJECT_ROOT, 'visualization'));
+            %addpath(fullfile(ProjectConfig.PROJECT_ROOT, 'visualization'));
         end
         
         function createDirectories()

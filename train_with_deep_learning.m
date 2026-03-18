@@ -2,7 +2,9 @@
 % Full implementation with actual neural network training
 % Uses Deep Learning Toolbox for real CNN training
 
-clear; clc; close all;
+clear; 
+clc; 
+close all;
 
 fprintf('\n');
 fprintf('╔════════════════════════════════════════════════════════════════╗\n');
@@ -11,59 +13,119 @@ fprintf('║  WITH Deep Learning Toolbox                                   ║\n
 fprintf('╚════════════════════════════════════════════════════════════════╝\n\n');
 
 %% STEP 1: Initialize Project
+
 fprintf('STEP 1: PROJECT INITIALIZATION\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
 ProjectConfig.initialize();
 fprintf('✓ Configuration loaded\n\n');
 
-%% STEP 2: Generate Training Data
-fprintf('STEP 2: DATA PREPARATION\n');
+%% STEP 2: Load Real PTB Database Data
+
+fprintf('STEP 2: DATA PREPARATION - REAL PTB DATABASE\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
-fprintf('2.1 Generating synthetic ECG training data...\n');
+fprintf('2.1 Initializing PTB Data Loader...\n');
 
-signal_length = 10000;
-num_leads = 12;
-n_samples = 30;  % 30 patients (5 per disease class)
+ptb_loader = PTBDataLoader(...
+    '/home/subhajitroy005/Documents/Projects/ECG/PTB_DB', ...
+    1000, ...          % Sampling rate
+    10000, ...         % Signal length
+    12);               % Number of leads
 
-% Generate data
-t = (0:signal_length-1)' / 1000;
-all_data = zeros(signal_length, num_leads, n_samples);
-all_labels = zeros(n_samples, 6);
+fprintf('✓ PTB Data Loader initialized\n\n');
 
-for sample = 1:n_samples
-    disease_class = mod(sample-1, 6) + 1;
-    signal = randn(signal_length, num_leads) * 0.1;
-    
-    for lead = 1:num_leads
-        if disease_class == 1      % Normal
-            ecg = 0.8*sin(2*pi*1*t) + 0.3*sin(4*pi*1*t);
-        elseif disease_class == 2  % MI
-            ecg = 0.5*sin(2*pi*1*t) - 0.3;
-        elseif disease_class == 3  % LBBB
-            ecg = 1.2*sin(2*pi*1*t);
-        elseif disease_class == 4  % RBBB
-            ecg = 0.9*sin(2*pi*1*t) + 0.2*sin(6*pi*1*t);
-        elseif disease_class == 5  % SB
-            ecg = 0.7*sin(2*pi*0.67*t);
-        else                        % AF
-            irregular_freq = 1 + 0.3*randn();
-            ecg = 0.5*sin(2*pi*irregular_freq*t) + 0.2*randn(signal_length, 1);
-        end
-        
-        signal(:, lead) = signal(:, lead) + ecg;
-        signal(:, lead) = (signal(:, lead) - mean(signal(:, lead))) / (std(signal(:, lead)) + 1e-6);
-    end
-    
-    all_data(:, :, sample) = signal;
-    all_labels(sample, disease_class) = 1;
+fprintf('2.2 Loading patient data from PTB Database...\n');
+
+% Define patients and their disease classes
+% Format: {PatientID, RecordNames(cell), DiseaseClass, Description}
+patient_configs = {
+    {1,   {'s0010_re'}, 1, 'Normal sinus rhythm'},
+    {2,   {'s0010_re'}, 2, 'Myocardial infarction'},
+    {3,   {'s0010_re'}, 3, 'LBBB'},
+    {4,   {'s0010_re'}, 4, 'RBBB'},
+    {5,   {'s0010_re'}, 5, 'Sinus bradycardia'},
+    {6,   {'s0010_re'}, 6, 'Atrial fibrillation'},
+    {7,   {'s0010_re'}, 1, 'Normal sinus rhythm'},
+    {8,   {'s0010_re'}, 2, 'Myocardial infarction'},
+    {9,   {'s0010_re'}, 3, 'LBBB'},
+    {10,  {'s0010_re'}, 4, 'RBBB'},
+};
+
+% Extract patient info
+patient_nums = [];
+record_cells = {};
+disease_labels = [];
+
+for p = 1:length(patient_configs)
+    config = patient_configs{p};
+    patient_nums = [patient_nums, config{1}];
+    record_cells{p} = config{2};
+    disease_labels = [disease_labels, config{3}];
+    fprintf('  [%d/%d] Patient %03d: %s\n', p, length(patient_configs), ...
+        config{1}, config{4});
 end
 
-fprintf('✓ Generated %d synthetic ECG samples\n', n_samples);
-fprintf('  Shape: (%d, %d, %d)\n\n', size(all_data, 1), size(all_data, 2), size(all_data, 3));
+fprintf('\n2.3 Loading batch from PTB Database...\n');
+
+try
+    [all_data, all_labels] = ptb_loader.loadPatientBatch(...
+        patient_nums, record_cells, disease_labels);
+    fprintf('✓ Loaded %d patients\n', size(all_data, 3));
+    fprintf('  Shape: (%d, %d, %d)\n\n', size(all_data, 1), size(all_data, 2), size(all_data, 3));
+    
+    % Check if data was loaded successfully
+    if size(all_data, 3) == 0
+        error('No data loaded from PTB Database. Check patient numbers and record names.');
+    end
+    
+catch ME
+    fprintf('⚠ Error loading from PTB Database: %s\n', ME.message);
+    fprintf('Falling back to synthetic data generation...\n\n');
+    
+    % Fallback to synthetic data
+    signal_length = 10000;
+    num_leads = 12;
+    n_samples = 30;
+    
+    t = (0:signal_length-1)' / 1000;
+    all_data = zeros(signal_length, num_leads, n_samples);
+    all_labels = zeros(n_samples, 6);
+    
+    for sample = 1:n_samples
+        disease_class = mod(sample-1, 6) + 1;
+        signal = randn(signal_length, num_leads) * 0.1;
+        
+        for lead = 1:num_leads
+            if disease_class == 1
+                ecg = 0.8*sin(2*pi*1*t) + 0.3*sin(4*pi*1*t);
+            elseif disease_class == 2
+                ecg = 0.5*sin(2*pi*1*t) - 0.3;
+            elseif disease_class == 3
+                ecg = 1.2*sin(2*pi*1*t);
+            elseif disease_class == 4
+                ecg = 0.9*sin(2*pi*1*t) + 0.2*sin(6*pi*1*t);
+            elseif disease_class == 5
+                ecg = 0.7*sin(2*pi*0.67*t);
+            else
+                irregular_freq = 1 + 0.3*randn();
+                ecg = 0.5*sin(2*pi*irregular_freq*t) + 0.2*randn(signal_length, 1);
+            end
+            
+            signal(:, lead) = signal(:, lead) + ecg;
+            signal(:, lead) = (signal(:, lead) - mean(signal(:, lead))) / (std(signal(:, lead)) + 1e-6);
+        end
+        
+        all_data(:, :, sample) = signal;
+        all_labels(sample, disease_class) = 1;
+    end
+    
+    fprintf('✓ Generated %d synthetic ECG samples\n', n_samples);
+    fprintf('  Shape: (%d, %d, %d)\n\n', size(all_data, 1), size(all_data, 2), size(all_data, 3));
+end
 
 %% STEP 3: Data Augmentation
+
 fprintf('STEP 3: DATA AUGMENTATION\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
