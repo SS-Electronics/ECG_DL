@@ -196,7 +196,7 @@ layers = [
     reluLayer('Name', 'relu3')
     maxPooling1dLayer(4, 'Stride', 4, 'Name', 'pool3')
     
-    flattenLayer('Name', 'flatten')
+    globalAveragePooling1dLayer('Name', 'gap')
     
     fullyConnectedLayer(256, 'Name', 'fc1')
     reluLayer('Name', 'relu4')
@@ -208,7 +208,6 @@ layers = [
     
     fullyConnectedLayer(6, 'Name', 'fc3')
     softmaxLayer('Name', 'softmax')
-    % NO classificationOutputLayer — loss is specified in trainnet()
 ];
 
 fprintf('✓ Network architecture created\n');
