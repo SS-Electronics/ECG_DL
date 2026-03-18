@@ -191,18 +191,37 @@ classdef TrainingOrchestrator < handle
         function logTrainingResults(obj, model, model_name)
             % Log training results and metrics
             
-            obj.training_log.results.(model_name).final_train_loss = ...
-                model.training_history.train_loss(end);
-            obj.training_log.results.(model_name).final_val_loss = ...
-                model.training_history.val_loss(end);
-            obj.training_log.results.(model_name).final_train_acc = ...
-                model.training_history.train_acc(end);
-            obj.training_log.results.(model_name).final_val_acc = ...
-                model.training_history.val_acc(end);
-            obj.training_log.results.(model_name).best_val_acc = ...
-                max(model.training_history.val_acc);
-            obj.training_log.results.(model_name).num_epochs = ...
-                length(model.training_history.epoch);
+            % Check if training_history exists
+            if ~isfield(model, 'training_history') || isempty(model.training_history)
+                fprintf('[TrainingOrchestrator] Warning: No training history for %s\n', model_name);
+                return;
+            end
+            
+            % Log metrics safely
+            try
+                if isfield(model.training_history, 'train_loss') && ~isempty(model.training_history.train_loss)
+                    obj.training_log.results.(model_name).final_train_loss = model.training_history.train_loss(end);
+                end
+                
+                if isfield(model.training_history, 'val_loss') && ~isempty(model.training_history.val_loss)
+                    obj.training_log.results.(model_name).final_val_loss = model.training_history.val_loss(end);
+                end
+                
+                if isfield(model.training_history, 'train_acc') && ~isempty(model.training_history.train_acc)
+                    obj.training_log.results.(model_name).final_train_acc = model.training_history.train_acc(end);
+                end
+                
+                if isfield(model.training_history, 'val_acc') && ~isempty(model.training_history.val_acc)
+                    obj.training_log.results.(model_name).final_val_acc = model.training_history.val_acc(end);
+                    obj.training_log.results.(model_name).best_val_acc = max(model.training_history.val_acc);
+                end
+                
+                if isfield(model.training_history, 'epoch') && ~isempty(model.training_history.epoch)
+                    obj.training_log.results.(model_name).num_epochs = length(model.training_history.epoch);
+                end
+            catch ME
+                fprintf('[TrainingOrchestrator] Error logging results for %s: %s\n', model_name, ME.message);
+            end
         end
         
         function generateTrainingSummary(obj)
