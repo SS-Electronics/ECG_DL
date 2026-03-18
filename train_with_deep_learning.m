@@ -22,106 +22,87 @@ fprintf('✓ Configuration loaded\n\n');
 
 %% STEP 2: Load Real PTB Database Data
 
-fprintf('STEP 2: DATA PREPARATION - REAL PTB DATABASE\n');
+fprintf('STEP 2: DATA LOADING (Auto-Discovery)\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
-
-fprintf('2.1 Initializing PTB Data Loader...\n');
-
-ptb_loader = PTBDataLoader(...
-    '/home/subhajitroy005/Documents/Projects/ECG/PTB_DB', ...
-    1000, ...          % Sampling rate
-    10000, ...         % Signal length
-    12);               % Number of leads
-
-fprintf('✓ PTB Data Loader initialized\n\n');
-
-fprintf('2.2 Loading patient data from PTB Database...\n');
-
-% Define patients and their disease classes
-% Format: {PatientID, RecordNames(cell), DiseaseClass, Description}
-patient_configs = {
-    {1,   {'s0010_re'}, 1, 'Normal sinus rhythm'},
-    {2,   {'s0010_re'}, 2, 'Myocardial infarction'},
-    {3,   {'s0010_re'}, 3, 'LBBB'},
-    {4,   {'s0010_re'}, 4, 'RBBB'},
-    {5,   {'s0010_re'}, 5, 'Sinus bradycardia'},
-    {6,   {'s0010_re'}, 6, 'Atrial fibrillation'},
-    {7,   {'s0010_re'}, 1, 'Normal sinus rhythm'},
-    {8,   {'s0010_re'}, 2, 'Myocardial infarction'},
-    {9,   {'s0010_re'}, 3, 'LBBB'},
-    {10,  {'s0010_re'}, 4, 'RBBB'},
-};
-
-% Extract patient info
-patient_nums = [];
-record_cells = {};
-disease_labels = [];
-
-for p = 1:length(patient_configs)
-    config = patient_configs{p};
-    patient_nums = [patient_nums, config{1}];
-    record_cells{p} = config{2};
-    disease_labels = [disease_labels, config{3}];
-    fprintf('  [%d/%d] Patient %03d: %s\n', p, length(patient_configs), ...
-        config{1}, config{4});
+ 
+ptb_path = ProjectConfig.PTB_DB_PATH;
+ 
+% Find all patient directories
+patient_dirs = dir(fullfile(ptb_path, 'patient*'));
+ 
+if isempty(patient_dirs)
+    error('No patient folders found in: %s', ptb_path);
 end
-
-fprintf('\n2.3 Loading batch from PTB Database...\n');
-
-try
-    [all_data, all_labels] = ptb_loader.loadPatientBatch(...
-        patient_nums, record_cells, disease_labels);
-    fprintf('✓ Loaded %d patients\n', size(all_data, 3));
-    fprintf('  Shape: (%d, %d, %d)\n\n', size(all_data, 1), size(all_data, 2), size(all_data, 3));
+ 
+fprintf('Found %d patient folders in PTB Database\n\n', length(patient_dirs));
+ 
+% Limit how many patients to load (adjust as needed)
+max_patients = min(50, length(patient_dirs));  % Load up to 50 patients
+ 
+% Initialize PTB loader
+ptb_loader = PTBDataLoader(...
+    ProjectConfig.PTB_DB_PATH, ...
+    ProjectConfig.SAMPLING_RATE, ...
+    ProjectConfig.SIGNAL_LENGTH, ...
+    ProjectConfig.NUM_LEADS);
+ 
+all_data = [];
+all_labels = [];
+loaded_count = 0;
+ 
+for p = 1:max_patients
+    patient_folder = fullfile(ptb_path, patient_dirs(p).name);
     
-    % Check if data was loaded successfully
-    if size(all_data, 3) == 0
-        error('No data loaded from PTB Database. Check patient numbers and record names.');
+    % Auto-discover .hea files in this patient's folder
+    hea_files = dir(fullfile(patient_folder, '*.hea'));
+    
+    if isempty(hea_files)
+        fprintf('  [%d/%d] %s: No .hea files, skipping\n', p, max_patients, patient_dirs(p).name);
+        continue;
     end
     
-catch ME
-    fprintf('⚠ Error loading from PTB Database: %s\n', ME.message);
-    fprintf('Falling back to synthetic data generation...\n\n');
+    % Use the FIRST record found (most patients have 1-3 records)
+    record_name = hea_files(1).name(1:end-4);  % Remove .hea extension
     
-    % Fallback to synthetic data
-    signal_length = 10000;
-    num_leads = 12;
-    n_samples = 30;
+    % Extract patient number from folder name (e.g., 'patient042' -> 42)
+    patient_num = str2double(regexp(patient_dirs(p).name, '\d+', 'match', 'once'));
     
-    t = (0:signal_length-1)' / 1000;
-    all_data = zeros(signal_length, num_leads, n_samples);
-    all_labels = zeros(n_samples, 6);
+    % Assign disease label based on PTB diagnostic categories
+    % NOTE: You should replace this with actual diagnosis from RECORDS file
+    % This is a placeholder that cycles through 6 classes
+    disease_class = mod(p - 1, 6) + 1;
     
-    for sample = 1:n_samples
-        disease_class = mod(sample-1, 6) + 1;
-        signal = randn(signal_length, num_leads) * 0.1;
+    try
+        % Load the patient record
+        dataset = ptb_loader.loadPatientDataset(patient_num, {record_name}, disease_class);
         
-        for lead = 1:num_leads
-            if disease_class == 1
-                ecg = 0.8*sin(2*pi*1*t) + 0.3*sin(4*pi*1*t);
-            elseif disease_class == 2
-                ecg = 0.5*sin(2*pi*1*t) - 0.3;
-            elseif disease_class == 3
-                ecg = 1.2*sin(2*pi*1*t);
-            elseif disease_class == 4
-                ecg = 0.9*sin(2*pi*1*t) + 0.2*sin(6*pi*1*t);
-            elseif disease_class == 5
-                ecg = 0.7*sin(2*pi*0.67*t);
-            else
-                irregular_freq = 1 + 0.3*randn();
-                ecg = 0.5*sin(2*pi*irregular_freq*t) + 0.2*randn(signal_length, 1);
-            end
+        if dataset.num_records > 0
+            patient_signal = mean(dataset.signals, 3);
+            all_data = cat(3, all_data, patient_signal);
             
-            signal(:, lead) = signal(:, lead) + ecg;
-            signal(:, lead) = (signal(:, lead) - mean(signal(:, lead))) / (std(signal(:, lead)) + 1e-6);
+            one_hot = zeros(1, 6);
+            one_hot(disease_class) = 1;
+            all_labels = [all_labels; one_hot];
+            
+            loaded_count = loaded_count + 1;
+            fprintf('  [%d/%d] %s → record: %s ✓ (class %d)\n', ...
+                p, max_patients, patient_dirs(p).name, record_name, disease_class);
         end
         
-        all_data(:, :, sample) = signal;
-        all_labels(sample, disease_class) = 1;
+    catch ME
+        fprintf('  [%d/%d] %s → %s ✗ (%s)\n', ...
+            p, max_patients, patient_dirs(p).name, record_name, ME.message);
     end
-    
-    fprintf('✓ Generated %d synthetic ECG samples\n', n_samples);
-    fprintf('  Shape: (%d, %d, %d)\n\n', size(all_data, 1), size(all_data, 2), size(all_data, 3));
+end
+ 
+fprintf('\n✓ Loaded %d patients successfully\n', loaded_count);
+fprintf('  Shape: (%d, %d, %d)\n\n', size(all_data, 1), size(all_data, 2), size(all_data, 3));
+ 
+% Sanity check
+if loaded_count < 6
+    warning('Only %d patients loaded. Need at least 6 for 6-class classification.', loaded_count);
+    fprintf('  Check that PTB_DB_PATH is correct: %s\n', ptb_path);
+    fprintf('  Check that .hea/.dat files exist in patient folders\n');
 end
 
 %% STEP 3: Data Augmentation
@@ -131,7 +112,11 @@ fprintf('───────────────────────�
 
 fprintf('3.1 Augmenting data (2x)...\n');
 
+n_samples = size(all_data, 3);
 augmented_data = all_data;
+
+
+
 for sample = 1:n_samples
     signal = all_data(:, :, sample);
     signal = signal * (0.95 + rand() * 0.1);
@@ -197,7 +182,7 @@ fprintf('───────────────────────�
 fprintf('6.1 Creating CNN1D architecture...\n');
 
 layers = [
-    sequenceInputLayer(12, 'Name', 'input')
+    sequenceInputLayer(12, 'Name', 'input', 'MinLength', 10000)
     
     convolution1dLayer(50, 32, 'Padding', 'same', 'Name', 'conv1')
     reluLayer('Name', 'relu1')
@@ -223,23 +208,59 @@ layers = [
     
     fullyConnectedLayer(6, 'Name', 'fc3')
     softmaxLayer('Name', 'softmax')
-    classificationOutputLayer('Name', 'output')
+    % NO classificationOutputLayer — loss is specified in trainnet()
 ];
 
 fprintf('✓ Network architecture created\n');
 fprintf('  Layers: %d\n\n', length(layers));
 
-%% STEP 7: Training Options
+%% STEP 7: Training Configuration
 fprintf('STEP 7: TRAINING CONFIGURATION\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
+ 
+fprintf('7.1 Formatting data for sequence input...\n');
+ 
+% Convert to cell arrays: each cell = (12 × 10000) = (features × time)
+train_data_T = cell(size(train_data, 3), 1);
+for i = 1:size(train_data, 3)
+    train_data_T{i} = train_data(:, :, i);          % (10000 × 12)
+end
 
-fprintf('7.1 Setting up training options...\n');
+val_data_T = cell(size(val_data, 3), 1);
+for i = 1:size(val_data, 3)
+    val_data_T{i} = val_data(:, :, i);              % (10000 × 12)
+end
 
-% Transpose data for trainNetwork (samples × time × features)
-train_data_T = permute(train_data, [3 1 2]);
-val_data_T = permute(val_data, [3 1 2]);
-test_data_T = permute(test_data, [3 1 2]);
-
+test_data_T = cell(size(test_data, 3), 1);
+for i = 1:size(test_data, 3)
+    test_data_T{i} = test_data(:, :, i);            % (10000 × 12)
+end
+ 
+fprintf('✓ Data formatted as cell arrays of sequences\n');
+fprintf('  Each sequence: (12 features × 10000 time steps)\n');
+fprintf('  Train: %d | Val: %d | Test: %d\n\n', ...
+    length(train_data_T), length(val_data_T), length(test_data_T));
+ 
+% ──────────────────────────────────────────────────────────────────
+% KEY FIX: Wrap data in combined datastores for trainnet()
+% This is the R2025a-compatible way to pass sequence data + labels
+% ──────────────────────────────────────────────────────────────────
+ 
+fprintf('7.2 Creating datastores for trainnet...\n');
+ 
+trainDS = combine( ...
+    arrayDatastore(train_data_T, 'OutputType', 'same'), ...
+    arrayDatastore(train_categories));
+ 
+valDS = combine( ...
+    arrayDatastore(val_data_T, 'OutputType', 'same'), ...
+    arrayDatastore(val_categories));
+ 
+fprintf('✓ Training datastore: %d observations\n', length(train_data_T));
+fprintf('✓ Validation datastore: %d observations\n\n', length(val_data_T));
+ 
+fprintf('7.3 Setting up training options...\n');
+ 
 options = trainingOptions('adam', ...
     'MaxEpochs', 50, ...
     'MiniBatchSize', 8, ...
@@ -247,42 +268,48 @@ options = trainingOptions('adam', ...
     'LearnRateSchedule', 'piecewise', ...
     'LearnRateDropPeriod', 10, ...
     'LearnRateDropFactor', 0.5, ...
-    'ValidationData', {val_data_T, val_categories}, ...
+    'ValidationData', valDS, ...
     'ValidationFrequency', 5, ...
     'ValidationPatience', 10, ...
     'Plots', 'training-progress', ...
     'Verbose', true);
-
+ 
 fprintf('✓ Training options configured\n');
 fprintf('  Epochs: 50\n');
 fprintf('  Batch size: 8\n');
 fprintf('  Optimizer: Adam\n');
 fprintf('  Learning rate: 0.001\n\n');
-
+ 
 %% STEP 8: Train Network
 fprintf('STEP 8: TRAINING CNN\n');
 fprintf('════════════════════════════════════════════════════════════════\n\n');
-
+ 
 fprintf('8.1 Starting training...\n');
 fprintf('(This may take 2-5 minutes)\n\n');
-
-% Train the network
-net = trainNetwork(train_data_T, train_categories, layers, options);
-
+ 
+% Train using datastore (R2025a compatible)
+net = trainnet(trainDS, layers, "crossentropy", options);
+ 
 fprintf('\n✓ Training complete!\n\n');
-
+ 
 %% STEP 9: Evaluate on Test Set
 fprintf('STEP 9: TESTING\n');
 fprintf('════════════════════════════════════════════════════════════════\n\n');
-
+ 
 fprintf('9.1 Evaluating on test set...\n');
-
-% Make predictions
-test_pred = classify(net, test_data_T);
-
+ 
+% Create test datastore
+testDS = arrayDatastore(test_data_T, 'OutputType', 'same');
+ 
+% Get prediction scores
+scores = minibatchpredict(net, testDS);
+ 
+% Convert scores to class labels
+test_pred = scores2label(scores, categories(train_categories));
+ 
 % Calculate accuracy
 accuracy = sum(test_pred == test_categories) / length(test_categories);
-
+ 
 fprintf('✓ Test accuracy: %.2f%%\n\n', accuracy * 100);
 
 %% STEP 10: Confusion Matrix
