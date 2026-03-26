@@ -22,6 +22,36 @@ fprintf('✓ Configuration loaded\n\n');
 
 %% STEP 2: Load Real PTB Database Data
 
+
+function disease_class = get_diagnosis_from_hea(hea_filepath)
+    disease_class = 0;
+    fid = fopen(hea_filepath, 'r');
+    if fid == -1, return; end
+    while ~feof(fid)
+        line = fgetl(fid);
+        if contains(line, 'Reason for admission', 'IgnoreCase', true)
+            if contains(line, 'Healthy', 'IgnoreCase', true) || ...
+               contains(line, 'normal', 'IgnoreCase', true)
+                disease_class = 1;
+            elseif contains(line, 'Myocardial infarction', 'IgnoreCase', true)
+                disease_class = 2;
+            elseif contains(line, 'Bundle branch block', 'IgnoreCase', true)
+                if contains(line, 'left', 'IgnoreCase', true)
+                    disease_class = 3;
+                else
+                    disease_class = 4;
+                end
+            elseif contains(line, 'Dysrhythmia', 'IgnoreCase', true) || ...
+                   contains(line, 'Atrial', 'IgnoreCase', true)
+                disease_class = 6;
+            elseif contains(line, 'Bradycardia', 'IgnoreCase', true)
+                disease_class = 5;
+            end
+        end
+    end
+    fclose(fid);
+end
+
 fprintf('STEP 2: DATA LOADING (Auto-Discovery)\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
  
@@ -37,7 +67,8 @@ end
 fprintf('Found %d patient folders in PTB Database\n\n', length(patient_dirs));
  
 % Limit how many patients to load (adjust as needed)
-max_patients = min(50, length(patient_dirs));  % Load up to 50 patients
+%max_patients = min(100, length(patient_dirs));  % Load up to 50 patients
+max_patients = length(patient_dirs);  % Load ALL patients
  
 % Initialize PTB loader
 ptb_loader = PTBDataLoader(...
@@ -70,7 +101,14 @@ for p = 1:max_patients
     % Assign disease label based on PTB diagnostic categories
     % NOTE: You should replace this with actual diagnosis from RECORDS file
     % This is a placeholder that cycles through 6 classes
-    disease_class = mod(p - 1, 6) + 1;
+    %disease_class = mod(p - 1, 6) + 1;
+
+    hea_filepath = fullfile(patient_folder, hea_files(1).name);
+    disease_class = get_diagnosis_from_hea(hea_filepath);
+    if disease_class == 0
+        fprintf('  [%d/%d] %s: Unknown diagnosis, skipping\n', p, max_patients, patient_dirs(p).name);
+        continue;
+    end
     
     try
         % Load the patient record
@@ -262,7 +300,7 @@ fprintf('7.3 Setting up training options...\n');
  
 options = trainingOptions('adam', ...
     'MaxEpochs', 50, ...
-    'MiniBatchSize', 8, ...
+    'MiniBatchSize', 32, ...
     'InitialLearnRate', 0.001, ...
     'LearnRateSchedule', 'piecewise', ...
     'LearnRateDropPeriod', 10, ...
@@ -270,6 +308,7 @@ options = trainingOptions('adam', ...
     'ValidationData', valDS, ...
     'ValidationFrequency', 5, ...
     'ValidationPatience', 10, ...
+    'ExecutionEnvironment', 'gpu', ...
     'Plots', 'training-progress', ...
     'Verbose', true);
  
