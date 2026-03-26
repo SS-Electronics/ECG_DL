@@ -121,8 +121,8 @@ classdef PTBDataLoader < handle
                 fprintf('[PTBDataLoader] Bandpass filter applied (0.5-40 Hz)\n');
                 
             catch ME
-                warning('[PTBDataLoader] Filtering failed: %s', ME.message);
-                warning('[PTBDataLoader] Using raw signal (install Signal Processing Toolbox)\n');
+                % warning('[PTBDataLoader] Filtering failed: %s', ME.message);
+                % warning('[PTBDataLoader] Using raw signal (install Signal Processing Toolbox)\n');
                 signal_filtered = signal;
             end
         end

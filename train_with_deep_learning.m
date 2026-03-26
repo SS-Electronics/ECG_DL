@@ -1,176 +1,102 @@
 %% ECG CNN CLASSIFICATION - COMPLETE TRAINING WITH DEEP LEARNING TOOLBOX
 % Full implementation with actual neural network training
-% Uses Deep Learning Toolbox for real CNN training
+% Uses modular load_ptb_database.m for clean data loading
 
-clear; 
-clc; 
-close all;
+clear; clc; close all;
 
 fprintf('\n');
 fprintf('╔════════════════════════════════════════════════════════════════╗\n');
 fprintf('║  ECG CNN Classification - Full Training Pipeline              ║\n');
-fprintf('║  WITH Deep Learning Toolbox                                   ║\n');
+fprintf('║  WITH Deep Learning Toolbox + Modular Data Loading            ║\n');
 fprintf('╚════════════════════════════════════════════════════════════════╝\n\n');
 
 %% STEP 1: Initialize Project
-
 fprintf('STEP 1: PROJECT INITIALIZATION\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
 ProjectConfig.initialize();
 fprintf('✓ Configuration loaded\n\n');
 
-%% STEP 2: Load Real PTB Database Data
-
-
-function disease_class = get_diagnosis_from_hea(hea_filepath)
-    disease_class = 0;
-    fid = fopen(hea_filepath, 'r');
-    if fid == -1, return; end
-    while ~feof(fid)
-        line = fgetl(fid);
-        if contains(line, 'Reason for admission', 'IgnoreCase', true)
-            if contains(line, 'Healthy', 'IgnoreCase', true) || ...
-               contains(line, 'normal', 'IgnoreCase', true)
-                disease_class = 1;
-            elseif contains(line, 'Myocardial infarction', 'IgnoreCase', true)
-                disease_class = 2;
-            elseif contains(line, 'Bundle branch block', 'IgnoreCase', true)
-                if contains(line, 'left', 'IgnoreCase', true)
-                    disease_class = 3;
-                else
-                    disease_class = 4;
-                end
-            elseif contains(line, 'Dysrhythmia', 'IgnoreCase', true) || ...
-                   contains(line, 'Atrial', 'IgnoreCase', true)
-                disease_class = 6;
-            elseif contains(line, 'Bradycardia', 'IgnoreCase', true)
-                disease_class = 5;
-            end
-        end
-    end
-    fclose(fid);
-end
-
-fprintf('STEP 2: DATA LOADING (Auto-Discovery)\n');
+%% STEP 2: Load PTB Database (modular function)
+fprintf('STEP 2: DATA LOADING\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
- 
-ptb_path = ProjectConfig.PTB_DB_PATH;
- 
-% Find all patient directories
-patient_dirs = dir(fullfile(ptb_path, 'patient*'));
- 
-if isempty(patient_dirs)
-    error('No patient folders found in: %s', ptb_path);
-end
- 
-fprintf('Found %d patient folders in PTB Database\n\n', length(patient_dirs));
- 
-% Limit how many patients to load (adjust as needed)
-%max_patients = min(100, length(patient_dirs));  % Load up to 50 patients
-max_patients = length(patient_dirs);  % Load ALL patients
- 
-% Initialize PTB loader
+
 ptb_loader = PTBDataLoader(...
     ProjectConfig.PTB_DB_PATH, ...
     ProjectConfig.SAMPLING_RATE, ...
     ProjectConfig.SIGNAL_LENGTH, ...
     ProjectConfig.NUM_LEADS);
- 
-all_data = [];
-all_labels = [];
-loaded_count = 0;
- 
-for p = 1:max_patients
-    patient_folder = fullfile(ptb_path, patient_dirs(p).name);
-    
-    % Auto-discover .hea files in this patient's folder
-    hea_files = dir(fullfile(patient_folder, '*.hea'));
-    
-    if isempty(hea_files)
-        fprintf('  [%d/%d] %s: No .hea files, skipping\n', p, max_patients, patient_dirs(p).name);
-        continue;
-    end
-    
-    % Use the FIRST record found (most patients have 1-3 records)
-    record_name = hea_files(1).name(1:end-4);  % Remove .hea extension
-    
-    % Extract patient number from folder name (e.g., 'patient042' -> 42)
-    patient_num = str2double(regexp(patient_dirs(p).name, '\d+', 'match', 'once'));
-    
-    % Assign disease label based on PTB diagnostic categories
-    % NOTE: You should replace this with actual diagnosis from RECORDS file
-    % This is a placeholder that cycles through 6 classes
-    %disease_class = mod(p - 1, 6) + 1;
 
-    hea_filepath = fullfile(patient_folder, hea_files(1).name);
-    disease_class = get_diagnosis_from_hea(hea_filepath);
-    if disease_class == 0
-        fprintf('  [%d/%d] %s: Unknown diagnosis, skipping\n', p, max_patients, patient_dirs(p).name);
-        continue;
-    end
-    
-    try
-        % Load the patient record
-        dataset = ptb_loader.loadPatientDataset(patient_num, {record_name}, disease_class);
-        
-        if dataset.num_records > 0
-            patient_signal = mean(dataset.signals, 3);
-            all_data = cat(3, all_data, patient_signal);
-            
-            one_hot = zeros(1, 6);
-            one_hot(disease_class) = 1;
-            all_labels = [all_labels; one_hot];
-            
-            loaded_count = loaded_count + 1;
-            fprintf('  [%d/%d] %s → record: %s ✓ (class %d)\n', ...
-                p, max_patients, patient_dirs(p).name, record_name, disease_class);
-        end
-        
-    catch ME
-        fprintf('  [%d/%d] %s → %s ✗ (%s)\n', ...
-            p, max_patients, patient_dirs(p).name, record_name, ME.message);
-    end
-end
- 
-fprintf('\n✓ Loaded %d patients successfully\n', loaded_count);
-fprintf('  Shape: (%d, %d, %d)\n\n', size(all_data, 1), size(all_data, 2), size(all_data, 3));
- 
+% ══════════════════════════════════════════════════════════════════
+%  Single clean function call replaces the entire loading loop
+%  Options:
+%    load_ptb_database(path, loader)                    — load all
+%    load_ptb_database(path, loader, 'MaxPatients', 100) — load 100
+%    load_ptb_database(path, loader, 'Filter', false)    — skip filter
+% ══════════════════════════════════════════════════════════════════
+
+[all_data, all_labels, load_info] = load_ptb_database(...
+    ProjectConfig.PTB_DB_PATH, ptb_loader, ...
+    'MaxPatients', Inf, ...   % Load ALL patients (change to 100, 50, etc.)
+    'Filter', true, ...       % Apply bandpass filter
+    'Verbose', true);         % Print progress
+
 % Sanity check
-if loaded_count < 6
-    warning('Only %d patients loaded. Need at least 6 for 6-class classification.', loaded_count);
-    fprintf('  Check that PTB_DB_PATH is correct: %s\n', ptb_path);
-    fprintf('  Check that .hea/.dat files exist in patient folders\n');
+if load_info.loaded < 6
+    error('Only %d patients loaded. Need at least 6 for 6-class classification.', load_info.loaded);
 end
 
-%% STEP 3: Data Augmentation
-
-fprintf('STEP 3: DATA AUGMENTATION\n');
+%% STEP 3: Class-Balanced Augmentation
+fprintf('STEP 3: CLASS-BALANCED AUGMENTATION\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
-fprintf('3.1 Augmenting data (2x)...\n');
-
 n_samples = size(all_data, 3);
+[~, class_ids] = max(all_labels, [], 2);
+class_counts = histcounts(class_ids, 1:7);
+max_count = max(class_counts);
+
+fprintf('  Class distribution before augmentation:\n');
+class_names = {'Normal', 'MI', 'LBBB', 'RBBB', 'SB', 'AF'};
+for c = 1:6
+    fprintf('    %-8s: %d samples\n', class_names{c}, class_counts(c));
+end
+fprintf('\n');
+
 augmented_data = all_data;
-
-
+augmented_labels = all_labels;
 
 for sample = 1:n_samples
-    signal = all_data(:, :, sample);
-    signal = signal * (0.95 + rand() * 0.1);
-    signal = signal + randn(size(signal)) * 0.01;
-    augmented_data = cat(3, augmented_data, signal);
+    cls = class_ids(sample);
+    % More augmentations for minority classes, fewer for majority
+    n_aug = max(1, round(max_count / max(class_counts(cls), 1)));
+    
+    for a = 1:n_aug
+        signal = all_data(:, :, sample);
+        % Random scaling (±10%)
+        signal = signal * (0.90 + rand() * 0.20);
+        % Gaussian noise
+        signal = signal + randn(size(signal)) * 0.02;
+        % Time shift (±200 samples)
+        shift = randi([-200, 200]);
+        signal = circshift(signal, shift, 1);
+        
+        augmented_data = cat(3, augmented_data, signal);
+        augmented_labels = [augmented_labels; all_labels(sample, :)];
+    end
 end
 
-augmented_labels = repmat(all_labels, 2, 1);
-
-fprintf('✓ Augmentation complete: %d → %d samples\n\n', n_samples, size(augmented_data, 3));
+% Print post-augmentation distribution
+[~, aug_class_ids] = max(augmented_labels, [], 2);
+aug_counts = histcounts(aug_class_ids, 1:7);
+fprintf('  Class distribution after augmentation:\n');
+for c = 1:6
+    fprintf('    %-8s: %d samples\n', class_names{c}, aug_counts(c));
+end
+fprintf('\n  Total: %d → %d samples\n\n', n_samples, size(augmented_data, 3));
 
 %% STEP 4: Data Split
 fprintf('STEP 4: DATA SPLITTING\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
-
-fprintf('4.1 Creating train/val/test split...\n');
 
 n_total = size(augmented_data, 3);
 n_train = floor(n_total * 0.6);
@@ -198,39 +124,35 @@ fprintf('  Train: %d | Val: %d | Test: %d\n\n', ...
 fprintf('STEP 5: CONVERT LABELS\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
-fprintf('5.1 Converting one-hot to categorical...\n');
-
 [~, train_class] = max(train_labels, [], 2);
 [~, val_class] = max(val_labels, [], 2);
 [~, test_class] = max(test_labels, [], 2);
 
-train_categories = categorical(train_class, 1:6, ...
-    {'Normal', 'MI', 'LBBB', 'RBBB', 'SB', 'AF'});
-val_categories = categorical(val_class, 1:6, ...
-    {'Normal', 'MI', 'LBBB', 'RBBB', 'SB', 'AF'});
-test_categories = categorical(test_class, 1:6, ...
-    {'Normal', 'MI', 'LBBB', 'RBBB', 'SB', 'AF'});
+train_categories = categorical(train_class, 1:6, class_names);
+val_categories = categorical(val_class, 1:6, class_names);
+test_categories = categorical(test_class, 1:6, class_names);
 
 fprintf('✓ Labels converted to categorical\n\n');
 
-%% STEP 6: Build Neural Network
+%% STEP 6: Build Neural Network (with batch normalization)
 fprintf('STEP 6: BUILD CNN ARCHITECTURE\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
-
-fprintf('6.1 Creating CNN1D architecture...\n');
 
 layers = [
     sequenceInputLayer(12, 'Name', 'input', 'MinLength', 10000)
     
     convolution1dLayer(50, 32, 'Padding', 'same', 'Name', 'conv1')
+    batchNormalizationLayer('Name', 'bn1')
     reluLayer('Name', 'relu1')
     maxPooling1dLayer(4, 'Stride', 4, 'Name', 'pool1')
     
     convolution1dLayer(30, 64, 'Padding', 'same', 'Name', 'conv2')
+    batchNormalizationLayer('Name', 'bn2')
     reluLayer('Name', 'relu2')
     maxPooling1dLayer(4, 'Stride', 4, 'Name', 'pool2')
     
     convolution1dLayer(20, 128, 'Padding', 'same', 'Name', 'conv3')
+    batchNormalizationLayer('Name', 'bn3')
     reluLayer('Name', 'relu3')
     maxPooling1dLayer(4, 'Stride', 4, 'Name', 'pool3')
     
@@ -238,190 +160,133 @@ layers = [
     
     fullyConnectedLayer(256, 'Name', 'fc1')
     reluLayer('Name', 'relu4')
-    dropoutLayer(0.5, 'Name', 'dropout1')
+    dropoutLayer(0.3, 'Name', 'dropout1')
     
     fullyConnectedLayer(128, 'Name', 'fc2')
     reluLayer('Name', 'relu5')
-    dropoutLayer(0.5, 'Name', 'dropout2')
+    dropoutLayer(0.3, 'Name', 'dropout2')
     
     fullyConnectedLayer(6, 'Name', 'fc3')
     softmaxLayer('Name', 'softmax')
 ];
 
-fprintf('✓ Network architecture created\n');
+fprintf('✓ Network architecture created (with BatchNorm)\n');
 fprintf('  Layers: %d\n\n', length(layers));
 
 %% STEP 7: Training Configuration
 fprintf('STEP 7: TRAINING CONFIGURATION\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
- 
-fprintf('7.1 Formatting data for sequence input...\n');
- 
-% Convert to cell arrays: each cell = (12 × 10000) = (features × time)
+
+% Convert to cell arrays for datastore
 train_data_T = cell(size(train_data, 3), 1);
 for i = 1:size(train_data, 3)
-    train_data_T{i} = train_data(:, :, i);          % (10000 × 12)
+    train_data_T{i} = train_data(:, :, i);
 end
 
 val_data_T = cell(size(val_data, 3), 1);
 for i = 1:size(val_data, 3)
-    val_data_T{i} = val_data(:, :, i);              % (10000 × 12)
+    val_data_T{i} = val_data(:, :, i);
 end
 
 test_data_T = cell(size(test_data, 3), 1);
 for i = 1:size(test_data, 3)
-    test_data_T{i} = test_data(:, :, i);            % (10000 × 12)
+    test_data_T{i} = test_data(:, :, i);
 end
- 
-fprintf('✓ Data formatted as cell arrays of sequences\n');
-fprintf('  Each sequence: (12 features × 10000 time steps)\n');
-fprintf('  Train: %d | Val: %d | Test: %d\n\n', ...
-    length(train_data_T), length(val_data_T), length(test_data_T));
- 
-% ──────────────────────────────────────────────────────────────────
-% KEY FIX: Wrap data in combined datastores for trainnet()
-% This is the R2025a-compatible way to pass sequence data + labels
-% ──────────────────────────────────────────────────────────────────
- 
-fprintf('7.2 Creating datastores for trainnet...\n');
- 
+
+% Wrap in datastores
 trainDS = combine( ...
     arrayDatastore(train_data_T, 'OutputType', 'same'), ...
     arrayDatastore(train_categories));
- 
+
 valDS = combine( ...
     arrayDatastore(val_data_T, 'OutputType', 'same'), ...
     arrayDatastore(val_categories));
- 
-fprintf('✓ Training datastore: %d observations\n', length(train_data_T));
-fprintf('✓ Validation datastore: %d observations\n\n', length(val_data_T));
- 
-fprintf('7.3 Setting up training options...\n');
- 
+
+fprintf('✓ Datastores created\n');
+fprintf('  Train: %d | Val: %d | Test: %d\n\n', ...
+    length(train_data_T), length(val_data_T), length(test_data_T));
+
 options = trainingOptions('adam', ...
-    'MaxEpochs', 50, ...
+    'MaxEpochs', 100, ...
     'MiniBatchSize', 32, ...
     'InitialLearnRate', 0.001, ...
     'LearnRateSchedule', 'piecewise', ...
-    'LearnRateDropPeriod', 10, ...
+    'LearnRateDropPeriod', 20, ...
     'LearnRateDropFactor', 0.5, ...
     'ValidationData', valDS, ...
-    'ValidationFrequency', 5, ...
-    'ValidationPatience', 10, ...
+    'ValidationFrequency', 10, ...
+    'ValidationPatience', 15, ...
     'ExecutionEnvironment', 'gpu', ...
     'Plots', 'training-progress', ...
     'Verbose', true);
- 
+
 fprintf('✓ Training options configured\n');
-fprintf('  Epochs: 50\n');
-fprintf('  Batch size: 8\n');
-fprintf('  Optimizer: Adam\n');
-fprintf('  Learning rate: 0.001\n\n');
- 
+fprintf('  Epochs: 100 | Batch: 32 | LR: 0.001 | GPU: on\n\n');
+
 %% STEP 8: Train Network
 fprintf('STEP 8: TRAINING CNN\n');
 fprintf('════════════════════════════════════════════════════════════════\n\n');
- 
-fprintf('8.1 Starting training...\n');
-fprintf('(This may take 2-5 minutes)\n\n');
- 
-% Train using datastore (R2025a compatible)
+
+fprintf('Starting training...\n\n');
 net = trainnet(trainDS, layers, "crossentropy", options);
- 
 fprintf('\n✓ Training complete!\n\n');
- 
+
 %% STEP 9: Evaluate on Test Set
 fprintf('STEP 9: TESTING\n');
 fprintf('════════════════════════════════════════════════════════════════\n\n');
- 
-fprintf('9.1 Evaluating on test set...\n');
- 
-% Create test datastore
+
 testDS = arrayDatastore(test_data_T, 'OutputType', 'same');
- 
-% Get prediction scores
 scores = minibatchpredict(net, testDS);
- 
-% Convert scores to class labels
 test_pred = scores2label(scores, categories(train_categories));
- 
-% Calculate accuracy
+
 accuracy = sum(test_pred == test_categories) / length(test_categories);
- 
 fprintf('✓ Test accuracy: %.2f%%\n\n', accuracy * 100);
 
 %% STEP 10: Confusion Matrix
 fprintf('STEP 10: CONFUSION MATRIX\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
-fprintf('10.1 Computing confusion matrix...\n\n');
-
 cm = confusionmat(test_categories, test_pred);
-class_names = {'Normal', 'MI', 'LBBB', 'RBBB', 'SB', 'AF'};
 
 fprintf('Confusion Matrix:\n');
-fprintf('           Normal  MI  LBBB RBBB  SB   AF\n');
+fprintf('           Normal   MI  LBBB  RBBB    SB    AF\n');
 for i = 1:6
-    fprintf('%s: ', class_names{i});
-    fprintf('%5d ', cm(i, :));
+    fprintf('%-8s', class_names{i});
+    fprintf('%6d', cm(i, :));
     fprintf('\n');
 end
 
-% Calculate per-class accuracy
 fprintf('\nPer-class Accuracy:\n');
 for i = 1:6
     if sum(cm(i, :)) > 0
         class_acc = cm(i, i) / sum(cm(i, :));
-        fprintf('  %s: %.2f%%\n', class_names{i}, class_acc * 100);
+        fprintf('  %-8s: %5.1f%%  (%d/%d)\n', class_names{i}, ...
+            class_acc * 100, cm(i,i), sum(cm(i,:)));
+    else
+        fprintf('  %-8s: N/A    (no test samples)\n', class_names{i});
     end
 end
-
 fprintf('\n');
 
 %% STEP 11: Save Results
 fprintf('STEP 11: SAVING RESULTS\n');
 fprintf('────────────────────────────────────────────────────────────────\n\n');
 
-fprintf('11.1 Saving trained network...\n');
-
 save_path = fullfile(pwd, 'ecg_cnn_trained.mat');
-save(save_path, 'net', '-v7.3');
-
-fprintf('✓ Model saved to: %s\n\n', save_path);
+save(save_path, 'net', 'load_info', 'accuracy', 'cm', 'class_names', '-v7.3');
+fprintf('✓ Saved: %s\n\n', save_path);
 
 %% STEP 12: Summary
-fprintf('\n╔════════════════════════════════════════════════════════════════╗\n');
+fprintf('╔════════════════════════════════════════════════════════════════╗\n');
 fprintf('║                    TRAINING SUMMARY                           ║\n');
+fprintf('╠════════════════════════════════════════════════════════════════╣\n');
+fprintf('║  Dataset: %d patients loaded, %d after augmentation          ║\n', ...
+    load_info.loaded, size(augmented_data, 3));
+fprintf('║  Split: %d train / %d val / %d test                          ║\n', ...
+    size(train_data, 3), size(val_data, 3), size(test_data, 3));
+fprintf('║  Network: 1D CNN + BatchNorm, 22 layers, ~311k params       ║\n');
+fprintf('║  Training: 100 epochs, batch 32, Adam, GPU                   ║\n');
+fprintf('║  Test Accuracy: %.2f%%                                       ║\n', accuracy * 100);
 fprintf('╚════════════════════════════════════════════════════════════════╝\n\n');
 
-fprintf('Dataset:\n');
-fprintf('  Total samples: %d\n', size(augmented_data, 3));
-fprintf('  Training: %d | Validation: %d | Testing: %d\n\n', ...
-    size(train_data, 3), size(val_data, 3), size(test_data, 3));
-
-fprintf('Network:\n');
-fprintf('  Type: 1D CNN\n');
-fprintf('  Layers: %d\n', length(layers));
-fprintf('  Parameters: ~250k\n\n');
-
-fprintf('Training:\n');
-fprintf('  Epochs: 50\n');
-fprintf('  Batch size: 8\n');
-fprintf('  Optimizer: Adam\n');
-fprintf('  Learning rate: 0.001\n\n');
-
-fprintf('Results:\n');
-fprintf('  Test Accuracy: %.2f%%\n\n', accuracy * 100);
-
-fprintf('Saved Files:\n');
-fprintf('  ✓ ecg_cnn_trained.mat\n\n');
-
-fprintf('════════════════════════════════════════════════════════════════\n\n');
-
 fprintf('✅ TRAINING COMPLETE!\n\n');
-
-fprintf('Next steps:\n');
-fprintf('  1. Experiment with different architectures\n');
-fprintf('  2. Try hyperparameter tuning\n');
-fprintf('  3. Load real PTB Database data\n');
-fprintf('  4. Deploy model to production\n\n');
